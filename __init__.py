@@ -1,9 +1,8 @@
 from hoshino.config import SUPERUSERS
 from hoshino import Service, priv
 from hoshino.typing import CQEvent
-import re
 
-from .sql import *
+from .sql import asql
 from .api import *
 from .draw import *
 
@@ -11,11 +10,12 @@ help = '''
 arcinfo 查询b30，需等待1-2分钟
 arcre   使用本地查分器查询最近一次游玩成绩
 arcre:  指令结尾带：使用est查分器查询最近一次游玩成绩
-arcre: arcid  使用好友码查询TA人
-arcre: @  使用@ 查询好友
+arcre: [arcid]  使用好友码查询TA人
+arcre: [@]  使用@ 查询好友
 arcup   查询用账号添加完好友，使用该指令绑定查询账号，添加成功即可使用arcre指令
 arcbind [arcid] [arcname]   绑定用户
-arcun   解除绑定'''
+arcun   解除绑定
+arcrd [定数] [难度] 随机一首该定数的曲目，例如：`arcrd 10.8`，`arcrd 10+`，`arcrd 9+ byd`'''
 
 diffdict = {
     '0' : ['pst', 'past'],
@@ -25,15 +25,13 @@ diffdict = {
 }
 
 sv = Service('arcaea', manage_priv=priv.ADMIN, enable_on_default=False, visible=True, help_=help)
-asql = arcsql()
 
 @sv.on_prefix(['arcinfo', 'ARCINFO', 'Arcinfo'])
 async def arcinfo(bot, ev:CQEvent):
     qqid = ev.user_id
     msg = ev.message.extract_plain_text().strip()
-    if 'CQ:at' in str(ev.message):
-        result = re.search(r'\[CQ:at,qq=(.*)\]', str(ev.message))
-        qqid = int(result.group(1))
+    if ev.message[0].type == 'at':
+        qqid = int(ev.message[0].data['qq'])
     result = asql.get_user(qqid)
     if msg:
         if msg.isdigit() and len(msg) == 9:
@@ -53,9 +51,8 @@ async def arcre(bot, ev:CQEvent):
     qqid = ev.user_id
     est = False
     msg = ev.message.extract_plain_text().strip()
-    if 'CQ:at' in str(ev.message):
-        result = re.search(r'\[CQ:at,qq=(.*)\]', str(ev.message))
-        qqid = int(result.group(1))
+    if ev.message[0].type == 'at':
+        qqid = int(ev.message[0].data['qq'])
     result = asql.get_user(qqid)
     if msg:
         if msg.isdigit() and len(msg) == 9:
@@ -96,7 +93,7 @@ async def arcrd(bot, ev:CQEvent):
         try:
             rating = float(args[0]) * 10
             if not 10 <= rating < 116:
-                await bot.finish(ev, '请输入定数：1-11.5|9+|10+')
+                await bot.finish(ev, '请输入定数：1-11.5 | 9+ | 10+')
             plus = False
         except ValueError:
             if '+' in args[0] and args[0][-1] == '+':

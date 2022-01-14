@@ -1,21 +1,20 @@
-import hoshino, os, traceback, random, base64
+import os, traceback, random, base64
 from time import strftime, localtime, time, mktime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from datetime import datetime
 from nonebot import NoneBot
 from io import BytesIO
-from typing import Union
-from shutil import copyfile
+from typing import Optional, Union
 from hoshino.config import SUPERUSERS
 from hoshino.typing import MessageSegment
+from hoshino.log import new_logger
 
 from .api import *
-from .sql import *
+from .sql import asql
 
 arc = os.path.dirname(__file__)
 songdir = os.path.join(arc, 'img', 'songs')
-
-asql = arcsql()
+ver_json = os.path.join(arc, 'version.json')
 
 diffdict = {
     '0' : ['pst', 'past'],
@@ -24,7 +23,7 @@ diffdict = {
     '3' : ['byd', 'beyond']
 }
 
-log = hoshino.new_logger('Arcaea_draw')
+log = new_logger('Arcaea_draw')
 
 class Data:
     
@@ -41,7 +40,7 @@ class Data:
     Kazesawa_Regular = os.path.join(_font_dir, 'Kazesawa-Regular.ttf')
 
     def __init__(self, project: str, info: dict) -> None:
-        self.isimg = True
+
         if project == 'recent':
             _playinfo = info['recent_score'][0]
             self.arcname: str = info['name']
@@ -60,8 +59,6 @@ class Data:
             self.play_time: int = _playinfo['time_played']
             self.rating: float = _playinfo['rating']
 
-            self.__recent__()
-
         elif project == 'best30':
             _playinfo = info[0]['data']
             self.scorelist: list = info[1:]
@@ -71,15 +68,14 @@ class Data:
             self.is_char_uncapped_override: bool = _playinfo['is_char_uncapped_override']
             self.ptt: int = _playinfo['rating']
 
-            self.__best30__()
         elif project == 'random':
             self._song_img = os.path.join(self._song_dir, info['song_id'], 'base.jpg' if info['difficulty'] != 3 else '3.jpg')
         else:
             raise TypeError
         
-    def __recent__(self) -> None:
+    async def recent(self) -> None:
 
-        _song_img = os.path.join(self._song_dir, self.songid, 'base.jpg' if self.difficulty != 3 else '3.jpg')
+        self._song_img = os.path.join(self._song_dir, self.songid, 'base.jpg' if self.difficulty != 3 else '3.jpg')
         _rank_img = os.path.join(self._rank_dir, f'grade_{self.isrank(self.score) if self.health != -1 else "F"}.png')
         _ptt_img = os.path.join(self._ptt_dir, self.pttbg(self.ptt))
         _bg_img = os.path.join(self._recent_dir, 'bg.png')
@@ -91,15 +87,9 @@ class Data:
         character_name = f'{self.character}u_icon.png' if self.is_char_uncapped ^ self.is_char_uncapped_override else f'{self.character}_icon.png'
         _character_img = os.path.join(self._char_dir, character_name)
 
-        if os.path.isdir(os.path.join(self._song_dir, self.songid)):
-            if os.path.isfile(_song_img):
-                self.song_img = self.open_img(_song_img)
-            else:
-                log.error(f'缺失曲目ID：{self._song_img}')
-                self.isimg = False
-        else:
-            log.error(f'缺失曲目文件夹：{self.songid}')
-            self.isimg = False
+        self.song_img = await self.async_img(self._song_img, 'songs', self.songid, self.difficulty)
+        c_img = await self.async_img(_character_img, 'char', character_name)
+        self.character_img = c_img.resize((200, 200))
         self.rank_img = self.open_img(_rank_img)
         self.ptt_img = self.open_img(_ptt_img)
         self.bg_img = self.open_img(_bg_img)
@@ -107,13 +97,8 @@ class Data:
         self.black_line = self.open_img(_black_line)
         self.white_line = self.open_img(_white_line)
         self.time_img = self.open_img(_time_img)
-        if os.path.isfile(_character_img):
-            self.character_img = self.open_img(_character_img).resize((200, 200))
-        else:
-            log.error(f'缺失搭档图片：{self.character_img}')
-            self.isimg = False
 
-    def __best30__(self) -> None:
+    async def best30(self) -> None:
 
         _bg_img = os.path.join(self._img, 'b30_bg.png')
         _ptt_img = os.path.join(self._ptt_dir, self.pttbg(self.ptt))
@@ -122,17 +107,14 @@ class Data:
         character_name = f'{self.character}u_icon.png' if self.is_char_uncapped ^ self.is_char_uncapped_override else f'{self.character}_icon.png'
         _character_img = os.path.join(self._char_dir, character_name)
 
+        c_img = await self.async_img(_character_img, 'char', character_name)
+        self.character_img = c_img.resize((250, 250))
         self.bg_img = self.open_img(_bg_img)
         self.ptt_img = self.open_img(_ptt_img).resize((150, 150))
         self.black_line = self.open_img(_black_line)
         self.time_img = self.open_img(_time_img)
-        if os.path.isfile(_character_img):
-            self.character_img = self.open_img(_character_img).resize((250, 250))
-        else:
-            log.error(f'缺失搭档图片：{self.character_img}')
-            self.isimg = False
 
-    def songdata(self, info: dict) -> None:
+    async def songdata(self, info: dict) -> None:
 
         self.songid: str = info['song_id']
         self.difficulty: int = info['difficulty']
@@ -146,35 +128,37 @@ class Data:
         self.play_time: int = info['time_played']
         self.rating: float = info['rating']
 
-        self.__b30_score__()
-
-    def __b30_score__(self) -> None:
-
         _b30_img = os.path.join(self._img, 'b30_score_bg.png')
         _rank_img = os.path.join(self._rank_dir, f'grade_{self.isrank(self.score) if self.health != -1 else "F"}.png')
         _song_img = os.path.join(self._song_dir, self.songid, 'base.jpg' if self.difficulty != 3 else '3.jpg')
         _diff_img = os.path.join(self._diff_dir, f'{self.diff(self.difficulty).upper()}.png')
         _new_img = os.path.join(self._img, 'new.png')
 
-        if os.path.isdir(os.path.join(self._song_dir, self.songid)):
-            if os.path.isfile(_song_img):
-                self.song_img = self.open_img(_song_img).resize((175, 175))
-            else:
-                log.error(f'缺失曲绘：{self._song_img}')
-                self.isimg = False
-        else:
-            log.error(f'缺失曲目文件夹及文件：{self.songid}')
-            self.isimg = False
+        s_img = await self.async_img(_song_img, 'songs', self.songid, self.difficulty)
+        self.song_img = s_img.resize((175, 175))
         self.b30_img = self.open_img(_b30_img)
         self.rank_img = self.open_img(_rank_img).resize((70, 40))
         self.diff_img = self.open_img(_diff_img)
         self.new_img = self.open_img(_new_img)
 
-    @staticmethod
-    def open_img(img: str) -> Image.Image:
+    def open_img(self, img: str) -> Image.Image:
         with open(img, 'rb') as f:
             im = Image.open(f).convert('RGBA')
         return im
+
+    async def async_img(self, img: str, project: str, data: str, diff: int = None) -> Image.Image:
+        if os.path.isfile(img):
+            with open(img, 'rb') as f:
+                im = Image.open(f).convert('RGBA')
+            return im
+        else:
+            if diff:
+                name = 'base.jpg' if diff != 3 else '3.jpg'
+                new_img = await download_img(project, data, name)
+            else:
+                new_img = await download_img(project, data)
+            if new_img:
+                return self.open_img(img)
 
     @staticmethod
     def pttbg(ptt: int) -> str:
@@ -334,6 +318,35 @@ class DrawText:
         draw_img.text(self._pos, self._text, self._color, self._font, self._anchor, stroke_width=self._stroke_width, stroke_fill=self._stroke_fill)
         return Image.alpha_composite(self._img, text_img)
 
+def calc_rating(project: int, songrating: Optional[float] = 0, score: Optional[int] = 0, rating: Optional[float] = 0) -> Union[int, float]:
+    if project == 0:
+        '''用定数和分数算ptt'''
+        if score >= 1e7:
+            result = songrating + 2
+        elif score >= 98e5:
+            result = songrating + 1 + (score - 98e5) / 2e5
+        else:
+            result = songrating + (score - 95e5) / 3e5
+    elif project == 1:
+        '''用定数和ptt算分数'''
+        if rating - 2 == songrating:
+            result = 1e7
+        elif rating - 2 < songrating and rating >= songrating:
+            result = 98e5 + (rating - songrating - 1) * 2e5
+        elif rating < songrating:
+            result = 95e5 + (rating - songrating) * 3e5
+    elif project == 2:
+        '''用分数和ptt算定数'''
+        if score >= 1e7:
+            result = rating - 2
+        elif score >= 98e5:
+            result = rating - 1 - (score - 98e5) / 2e5
+        else:
+            result = rating - (score - 95e5) / 3e5
+        result = f'{result:.1f}'
+    
+    return result
+
 def timediff(date: int) -> float:
     now = mktime(datetime.now().timetuple())
     time_diff = (now - date / 1000) / 86400
@@ -355,6 +368,8 @@ async def draw_info(arcid: int) -> str:
         if not isinstance(info, list):
             return info
         data = Data('best30', info)
+
+        await data.best30()
         
         data.scorelist.sort(key = lambda v: v['data'][0]['rating'], reverse=True)
         for i in range(30) if len(data.scorelist) >= 30 else range(len(data.scorelist)):
@@ -367,7 +382,7 @@ async def draw_info(arcid: int) -> str:
         im = Image.new('RGBA', (1800, 3000))
         im.alpha_composite(data.bg_img)
         # 搭档
-        im.alpha_composite(data.character_img, (175, 275))
+        im.alpha_composite(data.character_img, (175, 255))
         # ptt背景
         im.alpha_composite(data.ptt_img, (300, 380))
         # ptt
@@ -389,14 +404,11 @@ async def draw_info(arcid: int) -> str:
             if num % 3 == 0:
                 bg_y += 245 if num != 0 else 0
                 bg_x = 20
-            # elif num % 3 == 1:
-            #     bg_x += 615
             else:
                 bg_x += 590
 
-            data.songdata(i['data'][0])
-            if not data.isimg:
-                return '图片缺失，可能未更新搭档或曲绘，请联系BOT管理员'
+            await data.songdata(i['data'][0])
+
             # 背景
             im.alpha_composite(data.b30_img, (bg_x + 40, bg_y))
             # 难度
@@ -404,14 +416,16 @@ async def draw_info(arcid: int) -> str:
             # 曲绘
             im.alpha_composite(data.song_img, (bg_x + 70, bg_y + 50))
             # rank
-            im.alpha_composite(data.rank_img, (bg_x + 425, bg_y + 120))
+            rank_xy = (bg_x + 425, bg_y + 120) if data.health != -1 else (bg_x + 450, bg_y + 135)
+            im.alpha_composite(data.rank_img, rank_xy)
             # 黑线
             im.alpha_composite(data.black_line, (bg_x + 70, bg_y + 48))
             # 时间
             im.alpha_composite(data.time_img, (bg_x + 245, bg_y + 205))
-            # 曲名
+
             songinfo = asql.song_info(data.songid, data.diff(data.difficulty))
             title = songinfo[1] if songinfo[1] else songinfo[0]
+
             im = DrawText(im, bg_x + 290, bg_y + 35, 20, title, data.Kazesawa_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
             # songrating
             if data.song_rating < 10:
@@ -428,7 +442,7 @@ async def draw_info(arcid: int) -> str:
             # 名次
             im = DrawText(im, bg_x + 530, bg_y + 35, 45, num + 1, data.Exo_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
             # 分数
-            im = DrawText(im, bg_x + 260, bg_y + 75, 50, f'{data.score:,}', data.Exo_Regular, (0, 0, 0, 255), anchor='lm').draw_text()
+            im = DrawText(im, bg_x + 260, bg_y + 75, 45, f'{data.score:,}', data.Exo_Regular, (0, 0, 0, 255), anchor='lm').draw_text()
             # PURE 
             im = DrawText(im, bg_x + 260, bg_y + 130, 30, 'P', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
             im = DrawText(im, bg_x + 290, bg_y + 130, 25, data.p_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
@@ -475,13 +489,20 @@ async def draw_score(user_id: int, est: bool = False) -> Union[MessageSegment, s
                     break
                 
         data = Data('recent', userinfo)
-        if not data.isimg:
-            return '图片缺失，可能未更新搭档或曲绘，请联系BOT管理员'
+        await data.recent()
+
         ptt = data.ptt / 100 if data.ptt != -1 else '--'
         # 歌曲信息
         songinfo = asql.song_info(data.songid, data.diff(data.difficulty))
         title = songinfo[1] if songinfo[1] else songinfo[0]
-        songrating = songinfo[3] / 10
+        if songinfo[3] == -1:
+            if data.rating > 0:
+                songrating = calc_rating(2, score=data.score, rating=data.rating)
+                asql.add_song_rating(data.songid, data.diff(data.difficulty), songrating * 10)
+            else:
+                songrating = -1
+        else:
+            songrating = songinfo[3] / 10
 
         diffi = data.diff(data.difficulty)
         im = Image.new('RGBA', (1200, 900))
@@ -505,7 +526,7 @@ async def draw_score(user_id: int, est: bool = False) -> Union[MessageSegment, s
         # 时间
         im.alpha_composite(data.time_img, (562, 800))
         # 评价
-        im.alpha_composite(data.rank_img, (900, 630))
+        im.alpha_composite(data.rank_img, (900, 630) if data.health != -1 else (950, 650))
         # 昵称
         im = DrawText(im, 290, 100, 50, data.arcname, data.Exo_Regular, anchor='mm').draw_text()
         # 好友码
@@ -591,6 +612,8 @@ async def newbind(bot: NoneBot) -> None:
     try:
         bind_id, email, password = asql.get_not_full_email()
         info = await get_web_api(email, password)
+        if isinstance(info, str):
+            return info
         friend = info['value']['friends']
         for m in friend:
             arcname = m['name']

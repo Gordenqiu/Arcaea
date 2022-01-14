@@ -1,10 +1,13 @@
-import sqlite3, os, hoshino
+import sqlite3, os
 from typing import Union, List
+
+from hoshino.log import new_logger
 
 SQL = os.path.expanduser('~/.hoshino/arcaea.db')
 SONGSQL = os.path.join(os.path.dirname(__file__), 'arcsong.db')
+logger = new_logger('Arcaea_SQL')
 
-class arcsql:
+class ARCSQL:
 
     def __init__(self):
         os.makedirs(os.path.dirname(SQL), exist_ok=True)
@@ -31,7 +34,7 @@ class arcsql:
         except sqlite3.OperationalError:
             pass
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
     
     def makelogin(self):
         try:
@@ -45,19 +48,19 @@ class arcsql:
         except sqlite3.OperationalError:
             pass
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
     
     def maketemp(self):
         try:
             self.arc_conn().execute('''CREATE TABLE TEMPBIND(
                 ID          INTEGER     PRIMARY KEY     NOT NULL,
                 QQID        INTEGER     NOT NULL,
-                GID        INTEGER     NOT NULL
+                GID         INTEGER     NOT NULL
             )''')
         except sqlite3.OperationalError:
             pass
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
 
     # 临时绑定账号
     def insert_temp_user(self, qqid: int, arcid: int, arcname: str, gid: int) -> bool:
@@ -69,7 +72,7 @@ class arcsql:
             conn.commit()
             return True
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 正式绑定账号
@@ -81,7 +84,7 @@ class arcsql:
             self.__is_full__(bind_id)
             return True
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     def __is_full__(self, bind_id: int):
@@ -90,7 +93,7 @@ class arcsql:
             if len(info) == 10:
                 self.__update_is_full__(bind_id)
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
     
     def __update_is_full__(self, bind_id):
         try:
@@ -98,7 +101,7 @@ class arcsql:
             conn.execute(f'UPDATE LOGIN SET IS_FULL = 1 WHERE BIND_ID = {bind_id}')
             conn.commit()
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
 
     def delete_temp_user(self, qqid: int):
         try:
@@ -106,7 +109,7 @@ class arcsql:
             conn.execute(f'DELETE FROM TEMPBIND WHERE QQID = {qqid}')
             conn.commit()
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
 
     def get_gid(self, user_id: int) -> List[int]:
         try:
@@ -114,7 +117,7 @@ class arcsql:
             gid = self.arc_conn().execute(f'SELECT GID FROM TEMPBIND WHERE QQID = {qqid[0][0]}').fetchall()
             return [qqid[0][0], gid[0][0]]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 获取数据
@@ -128,7 +131,7 @@ class arcsql:
             email, pwd = self.__get_login__(bind_id)
             return arcid, email, pwd
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
     
     def __get_login__(self, bind_id):
@@ -136,13 +139,13 @@ class arcsql:
             result = self.arc_conn().execute(f'SELECT EMAIL, PASSWORD FROM LOGIN WHERE BIND_ID = {bind_id}').fetchall()
             return result[0][0], result[0][1]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
-    # 获取查询用账号
+    # 获取查分账号
     def get_not_full_email(self) -> Union[list, bool]:
         '''
-        获取好友未满的查询用 `bind_id` , `email` , `password`
+        获取好友未满的查分账号 `bind_id` , `email` , `password`
         '''
         try:
             result = self.arc_conn().execute(f'SELECT BIND_ID, EMAIL, PASSWORD FROM LOGIN WHERE IS_FULL = 0').fetchall()
@@ -151,7 +154,7 @@ class arcsql:
             else:
                 return result[0]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 获取好友码和user_id
@@ -166,7 +169,7 @@ class arcsql:
             else:
                 return result[0]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
     
     # 获取游戏名
@@ -178,7 +181,7 @@ class arcsql:
             result = self.arc_conn().execute(f'SELECT ARCNAME FROM USER WHERE USER_ID = {user_id}').fetchall()
             return result
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 获取user_id
@@ -193,7 +196,7 @@ class arcsql:
             else:
                 return result[0]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 删除账号
@@ -204,40 +207,58 @@ class arcsql:
             conn.commit()
             return True
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
 
     # 查询歌曲
     def song_info(self, songid: str, diff: str) -> Union[bool, dict]:
         try:
-            result = self.song_conn().execute(f'select name_en, name_jp, artist, {diff} from song where songid = "{songid}"').fetchall()
+            result = self.song_conn().execute(f'SELECT NAME_EN, NAME_JP, ARTIST, {diff} FROM SONG WHERE SONGID = "{songid}"').fetchall()
             if not result:
                 return False
             else:
                 return result[0]
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
+            return False
+
+    def add_song(self, songid: str, name_en: str, name_jp: str, artist: str) -> bool:
+        try:
+            conn = self.song_conn()
+            conn.execute(f'INSERT INTO SONG VALUES ("{songid}", "{name_en}", "{name_jp}", "{artist}", -1, -1, -1, -1)')
+            conn.commit()
+            return True
+        except:
+            return False
+
+    def add_song_rating(self, songid: str, diff: str, rating: int) -> bool:
+        try:
+            conn = self.song_conn()
+            conn.execute(f'UPDATE SONG SET {diff} = {rating} WHERE SONGID = "{songid}"')
+            conn.commit()
+            return True
+        except:
             return False
 
     def get_song(self, rating: float, plus: bool = False, diff: str = None) -> Union[bool, list]:
         try:
             if diff:
                 if plus:
-                    sql = f'select * from song where {diff} >= {rating + 7} and {diff} < {rating + 10}'
+                    sql = f'SELECT * FROM SONG WHERE {diff} >= {rating + 7} AND {diff} < {rating + 10}'
                 else:
-                    sql = f'select * from song where {diff} >= {rating} and {diff} < {rating + 7}'
+                    sql = f'SELECT * FROM SONG WHERE {diff} >= {rating} AND {diff} < {rating + 7}'
             elif plus:
                 rmin, rmax = rating + 7, rating + 10
-                sql = f'select * from song where (pst >= {rmin} and pst < {rmax}) or (prs >= {rmin} and prs < {rmax}) or (ftr >= {rmin} and ftr < {rmax}) or (byd >= {rmin} and byd < {rmax})'
+                sql = f'SELECT * FROM SONG WHERE (PST >= {rmin} AND PST < {rmax}) or (PRS >= {rmin} AND PRS < {rmax}) or (FTR >= {rmin} AND FTR < {rmax}) or (BYD >= {rmin} AND BYD < {rmax})'
             elif rating >= 90:
                 if rating % 10 != 0:
-                    sql = f'select * from song where pst = {rating} or prs = {rating} or ftr = {rating} or byd = {rating}'
+                    sql = f'SELECT * FROM SONG WHERE PST = {rating} or PRS = {rating} or FTR = {rating} or BYD = {rating}'
                 else:
                     rmin, rmax = rating, rating + 7
-                    sql = f'select * from song where (pst >= {rmin} and pst < {rmax}) or (prs >= {rmin} and prs < {rmax}) or (ftr >= {rmin} and ftr < {rmax}) or (byd >= {rmin} and byd < {rmax})'
+                    sql = f'SELECT * FROM SONG WHERE (PST >= {rmin} AND PST < {rmax}) or (PRS >= {rmin} AND PRS < {rmax}) or (FTR >= {rmin} AND FTR < {rmax}) or (BYD >= {rmin} AND BYD < {rmax})'
             else:
                 rmin, rmax = rating, rating + 10
-                sql = f'select * from song where (pst >= {rmin} and pst < {rmax}) or (prs >= {rmin} and prs < {rmax}) or (ftr >= {rmin} and ftr < {rmax}) or (byd >= {rmin} and byd < {rmax})'
+                sql = f'SELECT * FROM SONG WHERE (PST >= {rmin} AND PST < {rmax}) or (PRS >= {rmin} AND PRS < {rmax}) or (FTR >= {rmin} AND FTR < {rmax}) or (BYD >= {rmin} AND BYD < {rmax})'
             
             result = self.song_conn().execute(sql).fetchall()
             if not result:
@@ -245,5 +266,7 @@ class arcsql:
             else:
                 return result
         except Exception as e:
-            hoshino.logger.error(e)
+            logger.error(e)
             return False
+
+asql = ARCSQL()
