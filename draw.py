@@ -622,9 +622,14 @@ async def newbind(bot: NoneBot) -> None:
             if name: continue
             asql.insert_user(arcname.lower(), user_id, bind_id)
             user = asql.get_gid(user_id)
+            if not user:
+                await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'玩家：{arcname} 添加失败，可能游戏名错误')
+                continue
             await bot.send_group_msg(group_id=user[1], message=f'{MessageSegment.at(user[0])} 您的arc账号已绑定成功，现可用所有arc指令')
             asql.delete_temp_user(user[0])
             log.info(f'玩家：<{arcname}> 添加成功')
+        return '添加成功'
     except Exception as e:
         log.error(f'Error：{traceback.print_exc()}')
         await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'添加失败：{e}')
+        return '添加失败'

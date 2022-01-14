@@ -1,3 +1,4 @@
+import asyncio
 from hoshino.config import SUPERUSERS
 from hoshino import Service, priv
 from hoshino.typing import CQEvent
@@ -152,7 +153,8 @@ async def arcrd(bot, ev:CQEvent):
 async def arcup(bot, ev:CQEvent):
     if not priv.check_priv(ev, priv.SUPERUSER):
         await bot.finish(ev, '请联系BOT管理员更新')
-    await newbind(bot)
+    msg = await newbind(bot)
+    await bot.send(ev, msg, at_sender=True)
 
 @sv.on_prefix(['arcbind', 'ARCBIND', 'Arcbind'])
 async def bind(bot, ev:CQEvent):
@@ -169,6 +171,9 @@ async def bind(bot, ev:CQEvent):
     result = asql.get_user(qqid)
     if result:
         await bot.finish(ev, '您已绑定，如需要解绑请输入arcun', at_sender=True)
+    isTrue = f'请在10秒内再次确认您的账号是否正确，如不正确请输入arcun解绑\nArcid: {arcid[0]}\nArcname：{arcid[1]}'
+    await bot.send(ev, isTrue, at_sender=True)
+    await asyncio.sleep(10)
     msg = bindinfo(qqid, arcid[0], arcid[1], gid)
     await bot.send(ev, msg, at_sender=True)
     await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'Code:{arcid[0]}\nName:{arcid[1]}\n申请加为好友')
