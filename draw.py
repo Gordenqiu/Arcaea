@@ -343,7 +343,7 @@ def calc_rating(project: int, songrating: Optional[float] = 0, score: Optional[i
             result = rating - 1 - (score - 98e5) / 2e5
         else:
             result = rating - (score - 95e5) / 3e5
-        result = f'{result:.1f}'
+        result = float(f'{result:.1f}')
     
     return result
 
