@@ -2,10 +2,18 @@ import asyncio
 from hoshino.config import SUPERUSERS
 from hoshino import Service, priv
 from hoshino.typing import CQEvent
+from hoshino.log import new_logger
 
 from .sql import asql
 from .api import *
-from .draw import *
+from .draw import (
+    queue,
+    draw_info,
+    draw_score,
+    newbind,
+    bindinfo,
+    random_music
+)
 
 help = '''
 arcinfo 查询b30，需等待1-2分钟
@@ -30,45 +38,54 @@ sv = Service('arcaea', manage_priv=priv.ADMIN, enable_on_default=False, visible=
 @sv.on_prefix(['arcinfo', 'ARCINFO', 'Arcinfo'])
 async def arcinfo(bot, ev:CQEvent):
     qqid = ev.user_id
-    msg = ev.message.extract_plain_text().strip()
+    args: str = ev.message.extract_plain_text().strip()
     if ev.message[0].type == 'at':
         qqid = int(ev.message[0].data['qq'])
     result = asql.get_user(qqid)
-    if msg:
-        if msg.isdigit() and len(msg) == 9:
-            arcid = msg
+    if args:
+        if args.isdigit() and len(args) == 9:
+            arcid = args
         else:
             await bot.finish(ev, '仅可以使用好友码查询', at_sender=True)
     elif not result:
         await bot.finish(ev, '该账号尚未绑定，请输入 arcbind arcid(好友码) arcname(用户名)', at_sender=True)
     else:
         arcid = result[0]
-    await bot.send(ev, '正在查询，请耐心等待...')
-    info = await draw_info(arcid)
-    await bot.send(ev, info, at_sender=True)
+
+    UserLen = len(queue.UserList)
+    for i in queue.UserList:
+        if arcid in i:
+            await bot.finish(ev, f'您已在查询队列，请勿重复查询，当前队列还有[{UserLen - 1}]人，请耐心等待', at_sender=True)
+    queue.user_add(arcid, qqid, ev.group_id)
+    if UserLen == 0:
+        await bot.send(ev, '正在查询，请耐心等待...')
+    else:
+        await bot.finish(ev, f'当前队列还有[{UserLen - 1}]人，已进入查询队列，您在队列的第[{UserLen}]位，请等待', at_sender=True)
+
+    await draw_info(bot)
 
 @sv.on_prefix(['arcre', 'Arcre', 'ARCRE'])
 async def arcre(bot, ev:CQEvent):
     qqid = ev.user_id
     est = False
-    msg = ev.message.extract_plain_text().strip()
+    args: str = ev.message.extract_plain_text().strip()
     if ev.message[0].type == 'at':
         qqid = int(ev.message[0].data['qq'])
     result = asql.get_user(qqid)
-    if msg:
-        if msg.isdigit() and len(msg) == 9:
-            result = asql.get_user_code(msg)
+    if args:
+        if args.isdigit() and len(args) == 9:
+            result = asql.get_user_code(args)
             if not result:
                 await bot.finish(ev, '该账号尚未绑定，请输入 arcbind arcid(好友码) arcname(用户名)', at_sender=True)
             user_id = result[0]
-        elif msg == ':' or msg == '：':
+        elif args == ':' or args == '：':
             if not result:
                 await bot.finish(ev, '该账号尚未绑定，请输入 arcbind arcid(好友码) arcname(用户名)', at_sender=True)
             else:
                 est = True
                 user_id = result[0]
-        elif ':' in msg or '：' in msg:
-            user_id = msg[1:]
+        elif ':' in args or '：' in args:
+            user_id = args[1:]
             if user_id.isdigit() and len(user_id) == 9:
                 est = True
             else:
@@ -94,7 +111,7 @@ async def arcrd(bot, ev:CQEvent):
         try:
             rating = float(args[0]) * 10
             if not 10 <= rating < 116:
-                await bot.finish(ev, '请输入定数：1-11.5 | 9+ | 10+')
+                await bot.finish(ev, '请输入定数：1-11.5|9+|10+')
             plus = False
         except ValueError:
             if '+' in args[0] and args[0][-1] == '+':

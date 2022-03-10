@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from datetime import datetime
 from nonebot import NoneBot
 from io import BytesIO
-from typing import Optional, Union
+from typing import Dict, Optional, Union, List
 from hoshino.config import SUPERUSERS
 from hoshino.typing import MessageSegment
 from hoshino.log import new_logger
@@ -14,7 +14,6 @@ from .sql import asql
 
 arc = os.path.dirname(__file__)
 songdir = os.path.join(arc, 'img', 'songs')
-ver_json = os.path.join(arc, 'version.json')
 
 diffdict = {
     '0' : ['pst', 'past'],
@@ -24,6 +23,32 @@ diffdict = {
 }
 
 log = new_logger('Arcaea_draw')
+
+class InfoQueue:
+
+    UserList: List[Dict[str, List[int]]] = []
+
+    def __init__(self) -> None:
+        pass
+
+    def user_add(self, arcid: str, qqid: int, gid: int):
+        self.UserList.append({
+            arcid : [qqid, gid]
+        })
+
+    def user_del(self, arcid: str):
+        for i in self.UserList:
+            for key, value in i.items():
+                if key == arcid:
+                    self.UserList.remove(i)
+
+    def now(self) -> Dict[int, int]:
+        return self.UserList[0]
+
+    def clear(self):
+        self.UserList = []
+
+queue = InfoQueue()
 
 class Data:
     
@@ -346,7 +371,7 @@ def calc_rating(project: int, songrating: Optional[float] = 0, score: Optional[i
         result = float(f'{result:.1f}')
     
     return result
-
+        
 def timediff(date: int) -> float:
     now = mktime(datetime.now().timetuple())
     time_diff = (now - date / 1000) / 86400
@@ -359,114 +384,134 @@ def img2b64(img: Image.Image) -> str:
     base64_str = base64.b64encode(bytes).decode()
     return 'base64://' + base64_str
 
-async def draw_info(arcid: int) -> str:
+async def draw_info(bot: NoneBot) -> str:
     try:
         best30sum = 0
+
+        user = queue.now()
+
+        arcid = list(user.keys())[0]
+        qqid, gid = user[arcid]
+
         log.info(f'Start Arcaea API {Data.playtime(time() * 1000)}')
         info = await arcb30(arcid)
         log.info(f'End Arcaea API {Data.playtime(time() * 1000)}')
-        if not isinstance(info, list):
-            return info
-        data = Data('best30', info)
+        if isinstance(info, list):
+            
+            data = Data('best30', info)
+            await data.best30()
+            
+            data.scorelist.sort(key = lambda v: v['data'][0]['rating'], reverse=True)
+            for i in range(30) if len(data.scorelist) >= 30 else range(len(data.scorelist)):
+                best30sum += data.scorelist[i]['data'][0]['rating']
+            
+            ptt = data.ptt / 100 if data.ptt != -1 else '--'
+            b30 = best30sum / 30
+            r10 = (ptt - b30 * 0.75) / 0.25
+            # 底图
+            im = Image.new('RGBA', (1800, 3000))
+            im.alpha_composite(data.bg_img)
+            # 搭档
+            im.alpha_composite(data.character_img, (175, 255))
+            # ptt背景
+            im.alpha_composite(data.ptt_img, (300, 380))
+            # ptt
+            im = DrawText(im, 375, 455, 45, f'{ptt:.2f}', data.Exo_Regular, anchor='mm', stroke_width=1, stroke_fill=(0, 0, 0, 255)).draw_text()
+            # arcname
+            im = DrawText(im, 455, 380, 82, data.arcname, data.Exo_Regular, anchor='lb').draw_text()
+            # arcid
+            im = DrawText(im, 480, 455, 60, f'ID:{arcid}', data.Exo_Regular, anchor='lb').draw_text()
+            # r10
+            im = DrawText(im, 1100, 380, 60, f'Recent 10: {r10:.3f}', data.Exo_Regular, anchor='lb').draw_text()
+            # b30
+            im = DrawText(im, 1100, 405, 60, f'Best 30: {b30:.3f}', data.Exo_Regular).draw_text()
+            # 30个成绩
+            bg_y = 540
+            for num, i in enumerate(data.scorelist):
+                if num == 30:
+                    break
+                # 横3竖10
+                if num % 3 == 0:
+                    bg_y += 245 if num != 0 else 0
+                    bg_x = 20
+                else:
+                    bg_x += 590
 
-        await data.best30()
-        
-        data.scorelist.sort(key = lambda v: v['data'][0]['rating'], reverse=True)
-        for i in range(30) if len(data.scorelist) >= 30 else range(len(data.scorelist)):
-            best30sum += data.scorelist[i]['data'][0]['rating']
-        
-        ptt = data.ptt / 100 if data.ptt != -1 else '--'
-        b30 = best30sum / 30
-        r10 = (ptt - b30 * 0.75) / 0.25
-        # 底图
-        im = Image.new('RGBA', (1800, 3000))
-        im.alpha_composite(data.bg_img)
-        # 搭档
-        im.alpha_composite(data.character_img, (175, 255))
-        # ptt背景
-        im.alpha_composite(data.ptt_img, (300, 380))
-        # ptt
-        im = DrawText(im, 375, 455, 45, f'{ptt:.2f}', data.Exo_Regular, anchor='mm', stroke_width=1, stroke_fill=(0, 0, 0, 255)).draw_text()
-        # arcname
-        im = DrawText(im, 455, 380, 85, data.arcname, data.Exo_Regular, anchor='lb').draw_text()
-        # arcid
-        im = DrawText(im, 480, 455, 60, f'ID:{arcid}', data.Exo_Regular, anchor='lb').draw_text()
-        # r10
-        im = DrawText(im, 1100, 380, 60, f'Recent 10: {r10:.3f}', data.Exo_Regular, anchor='lb').draw_text()
-        # b30
-        im = DrawText(im, 1100, 405, 60, f'Best 30: {b30:.3f}', data.Exo_Regular).draw_text()
-        # 30个成绩
-        bg_y = 540
-        for num, i in enumerate(data.scorelist):
-            if num == 30:
-                break
-            # 横3竖10
-            if num % 3 == 0:
-                bg_y += 245 if num != 0 else 0
-                bg_x = 20
-            else:
-                bg_x += 590
+                await data.songdata(i['data'][0])
 
-            await data.songdata(i['data'][0])
+                # 背景
+                im.alpha_composite(data.b30_img, (bg_x + 40, bg_y))
+                # 难度
+                im.alpha_composite(data.diff_img, (bg_x + 40, bg_y + 25))
+                # 曲绘
+                im.alpha_composite(data.song_img, (bg_x + 70, bg_y + 50))
+                # rank
+                im.alpha_composite(data.rank_img, (bg_x + 425, bg_y + 120))
+                # 黑线
+                im.alpha_composite(data.black_line, (bg_x + 70, bg_y + 48))
+                # 时间
+                im.alpha_composite(data.time_img, (bg_x + 245, bg_y + 205))
 
-            # 背景
-            im.alpha_composite(data.b30_img, (bg_x + 40, bg_y))
-            # 难度
-            im.alpha_composite(data.diff_img, (bg_x + 40, bg_y + 25))
-            # 曲绘
-            im.alpha_composite(data.song_img, (bg_x + 70, bg_y + 50))
-            # rank
-            rank_xy = (bg_x + 425, bg_y + 120) if data.health != -1 else (bg_x + 450, bg_y + 135)
-            im.alpha_composite(data.rank_img, rank_xy)
-            # 黑线
-            im.alpha_composite(data.black_line, (bg_x + 70, bg_y + 48))
-            # 时间
-            im.alpha_composite(data.time_img, (bg_x + 245, bg_y + 205))
+                songinfo = asql.song_info(data.songid, data.diff(data.difficulty))
+                title = songinfo[1] if songinfo[1] else songinfo[0]
 
-            songinfo = asql.song_info(data.songid, data.diff(data.difficulty))
-            title = songinfo[1] if songinfo[1] else songinfo[0]
-
-            im = DrawText(im, bg_x + 290, bg_y + 35, 20, title, data.Kazesawa_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
-            # songrating
-            if data.song_rating < 10:
-                sr = f'{data.song_rating:.1f}'
-                im = DrawText(im, bg_x + 55, bg_y + 110, 20, sr[0], data.Exo_Regular, anchor='mm').draw_text()
-                im = DrawText(im, bg_x + 55, bg_y + 120, 20, sr[1], data.Exo_Regular, anchor='mm').draw_text()
-                im = DrawText(im, bg_x + 55, bg_y + 140, 20, sr[2], data.Exo_Regular, anchor='mm').draw_text()
-            else:
-                sr = f'{data.song_rating:.1f}'
-                im = DrawText(im, bg_x + 55, bg_y + 100, 20, sr[0], data.Exo_Regular, anchor='mm').draw_text()
-                im = DrawText(im, bg_x + 55, bg_y + 120, 20, sr[1], data.Exo_Regular, anchor='mm').draw_text()
-                im = DrawText(im, bg_x + 55, bg_y + 130, 20, sr[2], data.Exo_Regular, anchor='mm').draw_text()
-                im = DrawText(im, bg_x + 55, bg_y + 150, 20, sr[3], data.Exo_Regular, anchor='mm').draw_text()
-            # 名次
-            im = DrawText(im, bg_x + 530, bg_y + 35, 45, num + 1, data.Exo_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
-            # 分数
-            im = DrawText(im, bg_x + 260, bg_y + 75, 45, f'{data.score:,}', data.Exo_Regular, (0, 0, 0, 255), anchor='lm').draw_text()
-            # PURE 
-            im = DrawText(im, bg_x + 260, bg_y + 130, 30, 'P', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            im = DrawText(im, bg_x + 290, bg_y + 130, 25, data.p_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            im = DrawText(im, bg_x + 355, bg_y + 130, 20, f'| +{data.sp_count}', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            # FAR
-            im = DrawText(im, bg_x + 260, bg_y + 162, 30, 'F', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            im = DrawText(im, bg_x + 290, bg_y + 162, 25, data.far_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            # LOST
-            im = DrawText(im, bg_x + 260, bg_y + 194, 30, 'L', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            im = DrawText(im, bg_x + 290, bg_y + 194, 25, data.miss_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            # Rating
-            im = DrawText(im, bg_x + 360, bg_y + 194, 25, f'Rating | {data.rating:.2f}', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
-            # time
-            im = DrawText(im, bg_x + 395, bg_y + 215, 20, data.playtime(data.play_time), data.Exo_Regular, anchor='mm').draw_text()
-            # # new
-            if timediff(data.play_time) <= 7:
-                im.alpha_composite(data.new_img, (bg_x + 32, bg_y - 8))
-        # save
-        base64str = img2b64(im)
-        msg = MessageSegment.image(base64str)
+                im = DrawText(im, bg_x + 290, bg_y + 35, 20, title, data.Kazesawa_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
+                # songrating
+                if data.song_rating < 10:
+                    sr = f'{data.song_rating:.1f}'
+                    im = DrawText(im, bg_x + 55, bg_y + 110, 20, sr[0], data.Exo_Regular, anchor='mm').draw_text()
+                    im = DrawText(im, bg_x + 55, bg_y + 120, 20, sr[1], data.Exo_Regular, anchor='mm').draw_text()
+                    im = DrawText(im, bg_x + 55, bg_y + 140, 20, sr[2], data.Exo_Regular, anchor='mm').draw_text()
+                else:
+                    sr = f'{data.song_rating:.1f}'
+                    im = DrawText(im, bg_x + 55, bg_y + 100, 20, sr[0], data.Exo_Regular, anchor='mm').draw_text()
+                    im = DrawText(im, bg_x + 55, bg_y + 120, 20, sr[1], data.Exo_Regular, anchor='mm').draw_text()
+                    im = DrawText(im, bg_x + 55, bg_y + 130, 20, sr[2], data.Exo_Regular, anchor='mm').draw_text()
+                    im = DrawText(im, bg_x + 55, bg_y + 150, 20, sr[3], data.Exo_Regular, anchor='mm').draw_text()
+                # 名次
+                im = DrawText(im, bg_x + 530, bg_y + 35, 45, num + 1, data.Exo_Regular, (0, 0, 0, 255), anchor='mm').draw_text()
+                # 分数
+                im = DrawText(im, bg_x + 260, bg_y + 75, 45, f'{data.score:,}', data.Exo_Regular, (0, 0, 0, 255), anchor='lm').draw_text()
+                # PURE 
+                im = DrawText(im, bg_x + 260, bg_y + 130, 30, 'P', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                im = DrawText(im, bg_x + 290, bg_y + 130, 25, data.p_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                im = DrawText(im, bg_x + 355, bg_y + 130, 20, f'| +{data.sp_count}', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                # FAR
+                im = DrawText(im, bg_x + 260, bg_y + 162, 30, 'F', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                im = DrawText(im, bg_x + 290, bg_y + 162, 25, data.far_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                # LOST
+                im = DrawText(im, bg_x + 260, bg_y + 194, 30, 'L', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                im = DrawText(im, bg_x + 290, bg_y + 194, 25, data.miss_count, data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                # Rating
+                im = DrawText(im, bg_x + 360, bg_y + 194, 25, f'Rating | {data.rating:.2f}', data.Exo_Regular, (0, 0, 0, 255), anchor='ls').draw_text()
+                # time
+                im = DrawText(im, bg_x + 395, bg_y + 215, 20, data.playtime(data.play_time), data.Exo_Regular, anchor='mm').draw_text()
+                # new
+                if timediff(data.play_time) <= 7:
+                    im.alpha_composite(data.new_img, (bg_x + 32, bg_y - 8))
+            # save
+            base64str = img2b64(im)
+            msg = MessageSegment.image(base64str)
+        else:
+            msg = info
+        await bot.send_group_msg(group_id=gid, message=MessageSegment.at(qqid) + msg)
+        queue.user_del(arcid)
+        if len(queue.UserList) != 0:
+            await draw_info(bot)
+    except websockets.ConnectionClosedError:
+        msg = '可能在排队，请暂时停用<arcinfo>和<arcre:>指令'
+        for i in queue.UserList:
+            for k, v in i.items():
+                await bot.send_group_msg(group_id=v[1], message=MessageSegment.at(v[0]) + msg)
+    except ConnectionRefusedError:
+        msg = '连接失败'
+        queue.user_del(arcid)
+        await bot.send_group_msg(group_id=gid, message=MessageSegment.at(qqid) + msg)
     except Exception as e:
         log.error(traceback.print_exc())
-        msg = f'Error {type(e)}'
-    return msg
+        msg = f'Error:{type(e)}'
+        queue.user_del(arcid)
+        await bot.send_group_msg(group_id=gid, message=MessageSegment.at(qqid) + msg)
 
 async def draw_score(user_id: int, est: bool = False) -> Union[MessageSegment, str]:
     try:
@@ -526,7 +571,7 @@ async def draw_score(user_id: int, est: bool = False) -> Union[MessageSegment, s
         # 时间
         im.alpha_composite(data.time_img, (562, 800))
         # 评价
-        im.alpha_composite(data.rank_img, (900, 630) if data.health != -1 else (950, 650))
+        im.alpha_composite(data.rank_img, (900, 630))
         # 昵称
         im = DrawText(im, 290, 100, 50, data.arcname, data.Exo_Regular, anchor='mm').draw_text()
         # 好友码
@@ -595,8 +640,9 @@ def random_music(rating: int, plus: bool, diff: int) -> str:
     }
 
     data = Data('random', songs)
+    img = MessageSegment.image(file=f'file:///{data.songbg}')
 
-    msg = f'''[CQ:image,file=file:///{data.songbg}]
+    msg = f'''{img}
 Song: {songinfo[2] if songinfo[2] else songinfo[1]}
 Artist: {songinfo[3]}
 Difficulty: {' | '.join(diffc)}
@@ -610,25 +656,29 @@ def bindinfo(qqid: int, arcid: int, arcname: str, gid: int) -> str:
 
 async def newbind(bot: NoneBot) -> None:
     try:
-        bind_id, email, password = asql.get_not_full_email()
-        info = await get_web_api(email, password)
-        if isinstance(info, str):
-            return info
-        friend = info['value']['friends']
-        for m in friend:
-            arcname = m['name']
-            user_id = m['user_id']
-            name = asql.get_user_name(user_id)
-            if name: continue
-            asql.insert_user(arcname.lower(), user_id, bind_id)
-            user = asql.get_gid(user_id)
-            if not user:
-                await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'玩家：{arcname} 添加失败，可能游戏名错误')
-                continue
-            await bot.send_group_msg(group_id=user[1], message=f'{MessageSegment.at(user[0])} 您的arc账号已绑定成功，现可用所有arc指令')
-            asql.delete_temp_user(user[0])
-            log.info(f'玩家：<{arcname}> 添加成功')
-        return '添加成功'
+        login = asql.get_not_full_email()
+        for i in login:
+            bind_id = i[0]
+            email = i[1]
+            password = i[2]
+            info = await get_web_api(email, password)
+            if isinstance(info, str):
+                return info
+            friend: dict[str, Union[str, int]] = info['value']['friends']
+            for m in friend:
+                arcname = m['name']
+                user_id = m['user_id']
+                name = asql.get_user_name(user_id)
+                if name: continue
+                asql.insert_user(arcname.lower(), user_id, bind_id)
+                user = asql.get_gid(user_id)
+                if not user:
+                    await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'玩家：{arcname} 添加失败')
+                    continue
+                await bot.send_group_msg(group_id=user[1], message=f'{MessageSegment.at(user[0])} 您的arc账号已绑定成功，现可用所有arc指令')
+                asql.delete_temp_user(user[0])
+                log.info(f'玩家：<{arcname}> 添加成功')
+            return '添加成功'
     except Exception as e:
         log.error(f'Error：{traceback.print_exc()}')
         await bot.send_private_msg(user_id=SUPERUSERS[0], message=f'添加失败：{e}')
