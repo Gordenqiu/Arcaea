@@ -51,10 +51,40 @@ async def arcb30(arcid: str, re: bool = False) -> Union[str, dict]:
                 elif info['cmd'] == 'scores' or info['cmd'] == 'userinfo':
                     b30_data.append(info)
 
-async def update_arc() -> dict:
+async def download_img(project: str, data: str, name: int = None):
+    if project == 'songs':
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f'{imgapi}arcaea?songid={data}') as req:
+                new_data = await req.json()
+        
+        songid = new_data['songid']
+        artist = new_data['artist']
+        name_en = new_data['name_en']
+        name_jp = new_data['name_jp']
+        if name == 'base.jpg':
+            url = new_data['base_url']
+        else:
+            url = new_data['byd_url'] if 'byd_url' in new_data else ''
+        result = asql.song_info(songid, 'ftr')
+        if not result:
+            asql.add_song(songid, name_en, name_jp, artist)
+
+        new_dir = os.path.join(dir, 'songs', data)
+        if not os.path.isdir(new_dir):
+            os.makedirs(new_dir)
+        dirname = os.path.join(new_dir, name)
+    elif project == 'char':
+        url = imgapi + char_api + data
+        dirname = os.path.join(dir, 'char', data)
+    if os.path.isfile(dirname):
+        return False
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(imgapi + manual_update_api) as req:
-                return await req.json()
+            async with session.get(url) as req:
+                data = await req.read()
+                open(dirname, 'wb').write(data)
+                logger.info(f'文件：{dirname} 下载完成')
+                return True
     except Exception as e:
+        logger.info(f'文件：{dirname} 下载失败')
         return f'Error {type(e)}'
