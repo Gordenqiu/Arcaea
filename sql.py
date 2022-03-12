@@ -152,7 +152,7 @@ class ARCSQL:
             if not result:
                 return False
             else:
-                return result[0]
+                return result
         except Exception as e:
             logger.error(e)
             return False
