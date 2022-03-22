@@ -1,7 +1,7 @@
 import aiohttp, websockets, json, brotli, os
 from typing import Union
 from hoshino.log import new_logger
-
+import ssl
 from .sql import asql
 
 api = 'https://webapi.lowiro.com/'
@@ -30,7 +30,7 @@ async def get_web_api(email: str, password: str) -> Union[str, dict]:
 
 async def arcb30(arcid: str, re: bool = False) -> Union[str, dict]:
     b30_data = []
-    async with websockets.connect(est, timeout=10) as ws:
+    async with websockets.connect(est, timeout=10, ssl=ssl._create_unverified_context()) as ws:
         await ws.send(str(arcid))
         while True:
             if ws.closed:
