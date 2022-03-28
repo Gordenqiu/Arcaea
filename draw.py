@@ -101,7 +101,7 @@ class Data:
     async def recent(self) -> None:
 
         self._song_img = os.path.join(self._song_dir, self.songid, 'base.jpg' if self.difficulty != 3 else '3.jpg')
-        _rank_img = os.path.join(self._rank_dir, f'grade_{self.isrank(self.score) if self.health != -1 else "F"}.png')
+        _rank_img = os.path.join(self._rank_dir, f'grade_{self.isrank(self.score) if self.health != -1 else "f"}.png')
         _ptt_img = os.path.join(self._ptt_dir, self.pttbg(self.ptt))
         _bg_img = os.path.join(self._recent_dir, 'bg.png')
         _diff_img = os.path.join(self._recent_dir, f'{self.diff(self.difficulty)}.png')
